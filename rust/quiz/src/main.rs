@@ -1,5 +1,6 @@
 use csv::ReaderBuilder;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 
 #[derive(Debug)]
@@ -19,7 +20,8 @@ impl Problem {
 
 const FILE_NAME: &str = "../../input/problems.csv";
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let probs = parse_lines().expect("Could not parse CSV file");
 
     println!("Banana quiz about to start. Press enter when ready.");
@@ -33,27 +35,30 @@ fn main() {
     }
 
     let mut correct_ans = 0;
+    let (banana_s, mut banana_r) = mpsc::channel(512);
+    std::thread::spawn(move || loop {
+        let mut banana = String::new();
+        std::io::stdin().read_line(&mut banana);
+        banana.pop();
+        banana_s.blocking_send(banana).unwrap();
+    });
 
     for p in &probs {
         println!("What banana? {}", p.q);
-        let (banana_s, banana_r) = std::sync::mpsc::channel();
-
-        std::thread::spawn( move || {
-            let mut banana = String::new();
-            std::io::stdin().read_line(&mut banana);
-            banana.pop();
-            banana_s.send(banana).unwrap();
-        }); 
-
 
         let mut banana = String::new();
-        match banana_r.recv_timeout(Duration::from_secs(5)) {
-            Ok(b) => {banana.push_str(&b)},
-            Err(_) => {
+        match tokio::time::timeout(Duration::from_secs(5), banana_r.recv()).await {
+            Ok(opt) => {
+                match opt {
+                    Some(b) => banana.push_str(&b),
+                    None => {},
+                }
+            },
+            Err (_) => {
                 println!("Only have 5 seconds to input the answer!");
                 return;
             }
-        }
+        };
 
         println!("Your Banana: {}, Correct Banana: {}\n", banana, p.a);
 
@@ -66,7 +71,6 @@ fn main() {
         println!("------------");
         correct_ans += 1;
     }
-
     println!("Correct answers: {}/{}\n", correct_ans, probs.len())
 }
 
